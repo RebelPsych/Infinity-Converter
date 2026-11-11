@@ -37,8 +37,13 @@ export const ApkGitHubModal: React.FC<ApkGitHubModalProps> = ({ isOpen, onClose 
 
         {/* Modal Header */}
         <div className="flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 text-white font-mono text-2xl shadow-inner">
-            ∞
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-purple-800/60 bg-neutral-950 p-1.5 shadow-inner shrink-0">
+            <svg viewBox="0 0 100 100" className="w-full h-full" fill="none">
+              <path d="M 48 53 C 38 65, 30 68, 23 68 C 13 68, 8 60, 8 50 C 8 40, 13 32, 23 32 C 32 32, 43 38, 53 50 C 59 56, 67 62, 74 62" stroke="#a855f7" strokeWidth="9" strokeLinecap="round" />
+              <path d="M 74 62 L 66 68 L 68 56 Z" fill="#c084fc" />
+              <path d="M 53 47 C 63 35, 71 32, 78 32 C 88 32, 93 40, 93 50 C 93 60, 88 68, 78 68 C 69 68, 58 62, 48 50 C 42 44, 34 38, 27 38" stroke="#c084fc" strokeWidth="9" strokeLinecap="round" />
+              <path d="M 27 38 L 35 32 L 33 44 Z" fill="#e9d5ff" />
+            </svg>
           </div>
           <div>
             <h2 className="text-xl font-bold tracking-tight text-white">

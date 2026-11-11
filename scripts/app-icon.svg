@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGrad" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#190e2e" />
+      <stop offset="100%" stop-color="#07040d" />
+    </radialGradient>
+
+    <!-- Arrow 1 Gradient (Purple to Lavender) -->
+    <linearGradient id="arrowGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#C084FC" />
+      <stop offset="50%" stop-color="#A855F7" />
+      <stop offset="100%" stop-color="#7C3AED" />
+    </linearGradient>
+
+    <!-- Arrow 2 Gradient (Violet to Bright Orchid) -->
+    <linearGradient id="arrowGrad2" x1="100%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#E9D5FF" />
+      <stop offset="50%" stop-color="#9333EA" />
+      <stop offset="100%" stop-color="#6B21A8" />
+    </linearGradient>
+
+    <!-- Neon Glow Filter -->
+    <filter id="purpleGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Modern Dark Squircle App Icon Background -->
+  <rect width="512" height="512" rx="118" fill="url(#bgGrad)" />
+  <rect width="510" height="510" x="1" y="1" rx="117" fill="none" stroke="#A855F7" stroke-width="2.5" stroke-opacity="0.3" />
+
+  <!-- Ambient Purple Neon Aura -->
+  <ellipse cx="256" cy="256" rx="175" ry="110" fill="#9333EA" opacity="0.22" filter="url(#purpleGlow)" />
+
+  <g id="infinity-arrows" filter="url(#purpleGlow)">
+    <!-- ARROW 1: Originates from bottom-center crossing (256, 256), loops around the LEFT side, crosses to upper-right, and terminates with a bold arrowhead pointing down-right -->
+    <!-- Left Loop Body -->
+    <path
+      d="M 242 270 C 190 330, 150 345, 115 345 C 65 345, 42 308, 42 256 C 42 204, 65 167, 115 167 C 160 167, 215 200, 268 254 C 298 285, 335 315, 370 315"
+      fill="none"
+      stroke="url(#arrowGrad1)"
+      stroke-width="38"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <!-- Arrowhead 1 on Right side -->
+    <path
+      d="M 370 315 L 340 338 L 350 286 Z"
+      fill="#C084FC"
+      stroke="#C084FC"
+      stroke-width="6"
+      stroke-linejoin="round"
+      stroke-linecap="round"
+    />
+
+    <!-- ARROW 2: Originates from top-center crossing (256, 256), loops around the RIGHT side, crosses to lower-left, and terminates with a bold arrowhead pointing up-left -->
+    <!-- Right Loop Body -->
+    <path
+      d="M 270 242 C 322 182, 362 167, 397 167 C 447 167, 470 204, 470 256 C 470 308, 447 345, 397 345 C 352 345, 297 312, 244 258 C 214 227, 177 197, 142 197"
+      fill="none"
+      stroke="url(#arrowGrad2)"
+      stroke-width="38"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <!-- Arrowhead 2 on Left side -->
+    <path
+      d="M 142 197 L 172 174 L 162 226 Z"
+      fill="#E9D5FF"
+      stroke="#E9D5FF"
+      stroke-width="6"
+      stroke-linejoin="round"
+      stroke-linecap="round"
+    />
+  </g>
+</svg>
