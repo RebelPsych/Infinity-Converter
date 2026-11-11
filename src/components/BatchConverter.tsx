@@ -159,27 +159,34 @@ export const BatchConverter: React.FC = () => {
     <div className="w-full max-w-4xl mx-auto space-y-6">
       {/* Upload multiple */}
       <div
+        role="button"
+        tabIndex={0}
+        onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInputRef.current?.click()}
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
           if (e.dataTransfer.files) handleFiles(e.dataTransfer.files);
         }}
-        onClick={() => fileInputRef.current?.click()}
-        className="group relative flex flex-col items-center justify-center p-8 border-2 border-dashed border-neutral-800 hover:border-white rounded-2xl bg-neutral-950/60 hover:bg-neutral-900/50 transition-all cursor-pointer text-center"
+        className="group relative flex flex-col items-center justify-center p-8 border-2 border-dashed border-neutral-800 hover:border-white rounded-2xl bg-neutral-950/60 hover:bg-neutral-900/50 transition-all cursor-pointer text-center select-none"
       >
         <input
           ref={fileInputRef}
+          id="batch-file-input"
           type="file"
           multiple
           accept="video/*,audio/*,.mp4,.mp3,.wav,.mov,.mkv,.webm"
           className="hidden"
+          onClick={(e) => {
+            (e.target as HTMLInputElement).value = '';
+          }}
           onChange={(e) => e.target.files && handleFiles(e.target.files)}
         />
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 text-white shadow-lg mb-3">
+        <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 text-white shadow-lg mb-3 group-hover:scale-105 transition-transform">
           <Layers className="w-6 h-6" />
         </div>
         <h3 className="text-base font-semibold text-white">
-          Select or Drop Multiple Files
+          Select Files
         </h3>
       </div>
 

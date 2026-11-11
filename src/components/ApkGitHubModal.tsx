@@ -71,14 +71,14 @@ export const ApkGitHubModal: React.FC<ApkGitHubModalProps> = ({ isOpen, onClose 
                 Android Package (.apk)
               </span>
               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-neutral-800 text-neutral-300">
-                v1.0.0
+                Test Release
               </span>
             </div>
             <p className="text-xs text-neutral-400 leading-relaxed">
               Native Android APK with offline media processing and hardware accelerated Web Audio.
             </p>
             <div className="text-[11px] font-mono text-neutral-500 truncate">
-              Path: /test/infinity-converter.apk
+              Location: /test/infinity-converter.apk
             </div>
             <a
               href="/api/download/apk"
@@ -105,7 +105,7 @@ export const ApkGitHubModal: React.FC<ApkGitHubModalProps> = ({ isOpen, onClose 
               Complete source repository, README.md, APK release, Android source, and build scripts.
             </p>
             <div className="text-[11px] font-mono text-neutral-500 truncate">
-              Path: /test/infinity-converter-github.zip
+              Location: /test/infinity-converter-github.zip
             </div>
             <a
               href="/api/download/github-package"
@@ -125,7 +125,7 @@ export const ApkGitHubModal: React.FC<ApkGitHubModalProps> = ({ isOpen, onClose 
             Android Device Installation Steps
           </span>
           <ol className="text-xs text-neutral-300 space-y-2 list-decimal list-inside font-mono">
-            <li>Download the <strong className="text-white">infinity-converter.apk</strong> above.</li>
+            <li>Download <strong className="text-white">infinity-converter.apk</strong> above.</li>
             <li>On your Android phone/tablet, open <strong className="text-white">Settings &gt; Security &gt; Install Unknown Apps</strong>.</li>
             <li>Enable installation for your browser or file manager.</li>
             <li>Tap the APK notification to install and launch <strong className="text-white">Infinity Converter</strong>.</li>
@@ -140,12 +140,12 @@ export const ApkGitHubModal: React.FC<ApkGitHubModalProps> = ({ isOpen, onClose 
           </span>
           <div className="p-3 rounded-xl border border-neutral-800 bg-black text-neutral-400 font-mono text-[11px] space-y-1">
             <div className="text-white font-bold">/test/github-package/</div>
-            <div>├── releases/infinity-converter-v1.0.0.apk  (Signed Android APK)</div>
+            <div>├── releases/infinity-converter.apk        (Signed Android APK)</div>
             <div>├── android/AndroidManifest.xml           (Android manifest)</div>
             <div>├── android/src/MainActivity.java          (Android WebView host)</div>
             <div>├── src/                                   (React + Vite source)</div>
             <div>├── server.ts                              (Express + FFmpeg API)</div>
-            <div>├── README.md                              (GitHub badges & docs)</div>
+            <div>├── README.md                              (GitHub docs)</div>
             <div>└── package.json                           (Dependencies)</div>
           </div>
         </div>

@@ -13,4 +13,4 @@ Minimalist media converter for MP4 to MP3 and MP3 to 16:9 landscape MP4.
 
 ## Android APK
 - Location: `releases/infinity-converter.apk`
-- SHA256: `600e553576d113c295bed3f4a0c3a8cdab28f1f3a54e75e629ddc71c309afa4a`
+- SHA256: `b89ce5955688abaa4403848e72973016b456cfb2d8ef65c90ba15d903259436f`

@@ -253,23 +253,30 @@ export const Mp4ToMp3Converter: React.FC = () => {
       {/* Upload Zone */}
       {!file ? (
         <div
+          role="button"
+          tabIndex={0}
+          onClick={() => fileInputRef.current?.click()}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && fileInputRef.current?.click()}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className="group relative flex flex-col items-center justify-center p-12 border-2 border-dashed border-neutral-800 hover:border-white dark:border-neutral-800 dark:hover:border-white light:border-neutral-300 light:hover:border-black rounded-2xl bg-neutral-950/60 hover:bg-neutral-900/50 dark:bg-neutral-950/60 dark:hover:bg-neutral-900/50 light:bg-neutral-50 light:hover:bg-neutral-100 transition-all cursor-pointer text-center"
+          className="group relative flex flex-col items-center justify-center p-12 border-2 border-dashed border-neutral-800 hover:border-white rounded-2xl bg-neutral-950/60 hover:bg-neutral-900/50 transition-all cursor-pointer text-center select-none"
         >
           <input
             ref={fileInputRef}
+            id="mp4-file-input"
             type="file"
             accept="video/*,.mp4,.mov,.mkv,.webm,.avi"
             className="hidden"
+            onClick={(e) => {
+              (e.target as HTMLInputElement).value = '';
+            }}
             onChange={(e) => e.target.files?.[0] && handleFile(e.target.files[0])}
           />
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-700 bg-neutral-900 text-white dark:border-neutral-700 dark:bg-neutral-900 light:border-neutral-300 light:bg-white light:text-black shadow-lg mb-4 group-hover:scale-105 transition-transform">
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-neutral-700 bg-neutral-900 text-white shadow-lg mb-4 group-hover:scale-105 transition-transform">
             <Upload className="w-7 h-7" />
           </div>
-          <h3 className="text-base font-semibold text-white dark:text-white light:text-black">
-            Select or Drop MP4
+          <h3 className="text-base font-semibold text-white">
+            Select Files
           </h3>
         </div>
       ) : (

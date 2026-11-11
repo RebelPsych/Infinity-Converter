@@ -151,16 +151,24 @@ export const Mp3ToMp4Converter: React.FC = () => {
       {/* Hidden file inputs */}
       <input
         ref={audioInputRef}
+        id="mp3-to-mp4-audio-input"
         type="file"
         accept="audio/*,.mp3,.wav,.m4a,.aac,.flac,.ogg"
         className="hidden"
+        onClick={(e) => {
+          (e.target as HTMLInputElement).value = '';
+        }}
         onChange={(e) => e.target.files?.[0] && handleAudio(e.target.files[0])}
       />
       <input
         ref={imageInputRef}
+        id="mp3-to-mp4-image-input"
         type="file"
         accept="image/*,.jpg,.jpeg,.png,.webp,.bmp"
         className="hidden"
+        onClick={(e) => {
+          (e.target as HTMLInputElement).value = '';
+        }}
         onChange={(e) => e.target.files?.[0] && handleImage(e.target.files[0])}
       />
 
@@ -180,51 +188,57 @@ export const Mp3ToMp4Converter: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {/* Audio Picker Box */}
         <div
+          role="button"
+          tabIndex={0}
+          onClick={() => audioInputRef.current?.click()}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && audioInputRef.current?.click()}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
             if (e.dataTransfer.files?.[0]) handleAudio(e.dataTransfer.files[0]);
           }}
-          onClick={() => audioInputRef.current?.click()}
-          className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-2xl transition-all cursor-pointer text-center ${
+          className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-2xl transition-all cursor-pointer text-center select-none ${
             audioFile
-              ? 'border-white bg-neutral-900/60 dark:border-white dark:bg-neutral-900/60 light:border-black light:bg-neutral-100'
-              : 'border-neutral-800 hover:border-neutral-600 bg-neutral-950/60 dark:border-neutral-800 dark:bg-neutral-950/60 light:border-neutral-300 light:bg-neutral-50'
+              ? 'border-white bg-neutral-900/60'
+              : 'border-neutral-800 hover:border-white bg-neutral-950/60 hover:bg-neutral-900/50'
           }`}
         >
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 text-white dark:border-neutral-700 dark:bg-neutral-900 light:border-neutral-300 light:bg-white light:text-black mb-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 text-white mb-3 shadow-lg">
             <Music className="w-6 h-6" />
           </div>
-          <div className="text-sm font-semibold text-white dark:text-white light:text-black">
-            {audioFile ? audioFile.name : '1. Select Audio (MP3)'}
+          <div className="text-sm font-semibold text-white">
+            {audioFile ? audioFile.name : 'Select Files'}
           </div>
           <div className="text-xs font-mono text-neutral-400 mt-1">
-            {audioFile ? `${formatBytes(audioFile.size)} · ${formatDuration(duration)}` : 'Click or drop audio file'}
+            {audioFile ? `${formatBytes(audioFile.size)} · ${formatDuration(duration)}` : 'Audio track (MP3, WAV, M4A)'}
           </div>
         </div>
 
         {/* Image Picker Box */}
         <div
+          role="button"
+          tabIndex={0}
+          onClick={() => imageInputRef.current?.click()}
+          onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && imageInputRef.current?.click()}
           onDragOver={(e) => e.preventDefault()}
           onDrop={(e) => {
             e.preventDefault();
             if (e.dataTransfer.files?.[0]) handleImage(e.dataTransfer.files[0]);
           }}
-          onClick={() => imageInputRef.current?.click()}
-          className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-2xl transition-all cursor-pointer text-center ${
+          className={`flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-2xl transition-all cursor-pointer text-center select-none ${
             imageFile
-              ? 'border-white bg-neutral-900/60 dark:border-white dark:bg-neutral-900/60 light:border-black light:bg-neutral-100'
-              : 'border-neutral-800 hover:border-neutral-600 bg-neutral-950/60 dark:border-neutral-800 dark:bg-neutral-950/60 light:border-neutral-300 light:bg-neutral-50'
+              ? 'border-white bg-neutral-900/60'
+              : 'border-neutral-800 hover:border-white bg-neutral-950/60 hover:bg-neutral-900/50'
           }`}
         >
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 text-white dark:border-neutral-700 dark:bg-neutral-900 light:border-neutral-300 light:bg-white light:text-black mb-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl border border-neutral-700 bg-neutral-900 text-white mb-3 shadow-lg">
             <ImageIcon className="w-6 h-6" />
           </div>
-          <div className="text-sm font-semibold text-white dark:text-white light:text-black">
-            {imageFile ? imageFile.name : '2. Select Image'}
+          <div className="text-sm font-semibold text-white">
+            {imageFile ? imageFile.name : 'Select Files'}
           </div>
           <div className="text-xs font-mono text-neutral-400 mt-1">
-            {imageFile ? `${formatBytes(imageFile.size)} · Formatted for 16:9 Landscape` : 'Click or drop image file'}
+            {imageFile ? formatBytes(imageFile.size) : 'Landscape image (JPG, PNG, WebP)'}
           </div>
         </div>
       </div>
