@@ -1,0 +1,6 @@
+{
+  "name": "Infinity Converter",
+  "description": "Minimalist high-contrast media converter for MP4 to MP3 and MP3 to MP4 with visualizers and audio tools.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
