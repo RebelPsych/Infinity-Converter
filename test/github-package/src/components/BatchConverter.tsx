@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { BatchItem } from '../types';
 import { formatBytes } from '../utils/audioEncoder';
+import { downloadMedia } from '../utils/downloadHelper';
 
 export const BatchConverter: React.FC = () => {
   const [queue, setQueue] = useState<BatchItem[]>([]);
@@ -253,15 +254,15 @@ export const BatchConverter: React.FC = () => {
                       <span className="animate-spin">∞</span> Converting
                     </span>
                   )}
-                  {item.status === 'completed' && item.outputUrl && (
-                    <a
-                      href={item.outputUrl}
-                      download={item.outputName}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white text-black text-xs font-bold uppercase tracking-wider hover:bg-neutral-200 transition-colors"
+                  {item.status === 'completed' && item.outputBlob && (
+                    <button
+                      type="button"
+                      onClick={() => downloadMedia(item.outputBlob!, item.outputName || 'audio.mp3')}
+                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white text-black text-xs font-bold uppercase tracking-wider hover:bg-neutral-200 transition-colors cursor-pointer"
                     >
                       <Download className="w-3 h-3" />
                       <span>Download</span>
-                    </a>
+                    </button>
                   )}
                   {item.status === 'error' && (
                     <span className="text-[11px] font-mono text-red-400">Failed</span>

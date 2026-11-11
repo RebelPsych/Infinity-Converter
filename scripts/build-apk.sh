@@ -227,6 +227,34 @@ public class MainActivity extends Activity {
             }
         });
 
+        // Bridge to save downloads directly to Android Downloads directory
+        webView.addJavascriptInterface(new Object() {
+            @android.webkit.JavascriptInterface
+            public void downloadBase64(String base64Data, String filename, String mimeType) {
+                try {
+                    byte[] bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
+                    java.io.File path = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
+                    if (!path.exists()) {
+                        path.mkdirs();
+                    }
+                    java.io.File file = new java.io.File(path, filename);
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(file);
+                    fos.write(bytes);
+                    fos.flush();
+                    fos.close();
+                    android.media.MediaScannerConnection.scanFile(MainActivity.this, new String[]{file.getAbsolutePath()}, new String[]{mimeType}, null);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            android.widget.Toast.makeText(MainActivity.this, "Saved to Downloads: " + filename, android.widget.Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        }, "AndroidBridge");
+
         // Load via virtual secure local domain
         webView.loadUrl("https://infinity.local/index.html");
 

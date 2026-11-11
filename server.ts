@@ -20,6 +20,11 @@ if (!fs.existsSync(UPLOAD_DIR)) {
   fs.mkdirSync(UPLOAD_DIR, { recursive: true });
 }
 
+const DOWNLOAD_DIR = path.join('/tmp', 'infinity-downloads');
+if (!fs.existsSync(DOWNLOAD_DIR)) {
+  fs.mkdirSync(DOWNLOAD_DIR, { recursive: true });
+}
+
 // Multer upload config
 const upload = multer({
   dest: UPLOAD_DIR,
@@ -29,6 +34,18 @@ const upload = multer({
 });
 
 app.use(express.json());
+
+// Global CORS & preflight middleware
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Range');
+  res.header('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, X-Output-Filename, X-Download-Url');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // Helper function to safely remove files
 function cleanupFiles(filePaths: (string | undefined)[]) {
@@ -174,9 +191,19 @@ app.post('/api/convert/mp4-to-mp3', upload.single('file'), (req: Request, res: R
     }
 
     const downloadFileName = `${baseName}.mp3`;
+    const fileId = `${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+    const persistentPath = path.join(DOWNLOAD_DIR, fileId);
+    try {
+      fs.copyFileSync(outputPath, persistentPath);
+    } catch (e) {
+      console.warn('Failed to copy to persistent download dir:', e);
+    }
+
+    const downloadUrl = `/api/download/file/${fileId}?name=${encodeURIComponent(downloadFileName)}`;
     res.setHeader('Content-Type', 'audio/mpeg');
     res.setHeader('Content-Disposition', `attachment; filename="${downloadFileName}"`);
     res.setHeader('X-Output-Filename', downloadFileName);
+    res.setHeader('X-Download-Url', downloadUrl);
 
     const fileStream = fs.createReadStream(outputPath);
     fileStream.pipe(res);
@@ -291,9 +318,19 @@ app.post('/api/convert/mp3-to-mp4', upload.fields([
     }
 
     const downloadFileName = `${baseName}.mp4`;
+    const fileId = `${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 8)}`;
+    const persistentPath = path.join(DOWNLOAD_DIR, fileId);
+    try {
+      fs.copyFileSync(outputPath, persistentPath);
+    } catch (e) {
+      console.warn('Failed to copy to persistent download dir:', e);
+    }
+
+    const downloadUrl = `/api/download/file/${fileId}?name=${encodeURIComponent(downloadFileName)}`;
     res.setHeader('Content-Type', 'video/mp4');
     res.setHeader('Content-Disposition', `attachment; filename="${downloadFileName}"`);
     res.setHeader('X-Output-Filename', downloadFileName);
+    res.setHeader('X-Download-Url', downloadUrl);
 
     const fileStream = fs.createReadStream(outputPath);
     fileStream.pipe(res);
@@ -309,7 +346,25 @@ app.post('/api/convert/mp3-to-mp4', upload.fields([
   });
 });
 
-// 5. Download APK endpoint
+// 5. Direct Persistent File Download endpoint
+app.get('/api/download/file/:id', (req: Request, res: Response) => {
+  const fileId = req.params.id;
+  const requestedName = (req.query.name as string) || 'download';
+  const filePath = path.join(DOWNLOAD_DIR, fileId);
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File expired or not found' });
+  }
+
+  const ext = path.extname(requestedName).toLowerCase();
+  const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.mp4' ? 'video/mp4' : 'application/octet-stream';
+
+  res.setHeader('Content-Type', contentType);
+  res.setHeader('Content-Disposition', `attachment; filename="${requestedName}"`);
+  fs.createReadStream(filePath).pipe(res);
+});
+
+// 6. Download APK endpoint
 app.get('/api/download/apk', (_req: Request, res: Response) => {
   const apkPath = path.join(__dirname, 'test', 'infinity-converter.apk');
   if (!fs.existsSync(apkPath)) {
