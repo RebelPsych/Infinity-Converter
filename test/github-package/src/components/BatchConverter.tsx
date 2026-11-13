@@ -12,8 +12,24 @@ import {
   Archive,
 } from 'lucide-react';
 import { BatchItem } from '../types';
-import { formatBytes } from '../utils/audioEncoder';
-import { downloadMedia } from '../utils/downloadHelper';
+import { formatBytes, extractAudioFromVideoLocal, audioBufferToMp3 } from '../utils/audioEncoder';
+import { downloadMedia, isAndroidApk } from '../utils/downloadHelper';
+import { synthesizeLandscapeVideoClient } from '../utils/videoSynthesizer';
+
+async function createBlackImageFile(): Promise<File> {
+  const c = document.createElement('canvas');
+  c.width = 1280;
+  c.height = 720;
+  const ctx = c.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, c.width, c.height);
+  }
+  const blob = await new Promise<Blob>((resolve) =>
+    c.toBlob((b) => resolve(b || new Blob()), 'image/png')
+  );
+  return new File([blob], 'black.png', { type: 'image/png' });
+}
 
 export const BatchConverter: React.FC = () => {
   const [queue, setQueue] = useState<BatchItem[]>([]);
@@ -58,34 +74,36 @@ export const BatchConverter: React.FC = () => {
       const item = queue[i];
       if (item.status === 'completed') continue;
 
-      // Update status to converting
       setQueue((prev) =>
         prev.map((it) => (it.id === item.id ? { ...it, status: 'converting', progress: 15 } : it))
       );
 
       try {
-        const formData = new FormData();
-        formData.append('file', item.file);
+        const baseName = item.file.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
 
         if (item.mode === 'mp4-to-mp3') {
-          formData.append('bitrate', '320k');
-          formData.append('sampleRate', '44100');
-          formData.append('channels', '2');
+          let blob: Blob | null = null;
+          if (!isAndroidApk()) {
+            try {
+              const formData = new FormData();
+              formData.append('file', item.file);
+              formData.append('bitrate', '320k');
+              formData.append('sampleRate', '44100');
+              formData.append('channels', '2');
+              const res = await fetch('/api/convert/mp4-to-mp3', { method: 'POST', body: formData });
+              if (res.ok) blob = await res.blob();
+            } catch {
+              // fallback below
+            }
+          }
 
-          setQueue((prev) =>
-            prev.map((it) => (it.id === item.id ? { ...it, progress: 45 } : it))
-          );
+          if (!blob) {
+            const audioBuffer = await extractAudioFromVideoLocal(item.file);
+            blob = await audioBufferToMp3(audioBuffer, 192);
+          }
 
-          const res = await fetch('/api/convert/mp4-to-mp3', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!res.ok) throw new Error('Conversion failed');
-          const blob = await res.blob();
           const url = URL.createObjectURL(blob);
-          const baseName = item.file.name.replace(/\.[^/.]+$/, '');
-          const outName = `${baseName}.mp3`;
+          const outName = `${baseName || 'audio'}.mp3`;
 
           setQueue((prev) =>
             prev.map((it) =>
@@ -94,35 +112,38 @@ export const BatchConverter: React.FC = () => {
                     ...it,
                     status: 'completed',
                     progress: 100,
-                    outputBlob: blob,
+                    outputBlob: blob!,
                     outputUrl: url,
                     outputName: outName,
-                    outputSize: blob.size,
+                    outputSize: blob!.size,
                   }
                 : it
             )
           );
         } else {
-          // mp3-to-mp4
-          formData.append('preset', 'infinity');
-          formData.append('aspectRatio', '16:9');
-          formData.append('theme', 'dark');
-          formData.append('fps', '30');
+          let blob: Blob | null = null;
+          let ext = 'mp4';
 
-          setQueue((prev) =>
-            prev.map((it) => (it.id === item.id ? { ...it, progress: 45 } : it))
-          );
+          if (!isAndroidApk()) {
+            try {
+              const formData = new FormData();
+              formData.append('file', item.file);
+              const res = await fetch('/api/convert/mp3-to-mp4', { method: 'POST', body: formData });
+              if (res.ok) blob = await res.blob();
+            } catch {
+              // fallback below
+            }
+          }
 
-          const res = await fetch('/api/convert/mp3-to-mp4', {
-            method: 'POST',
-            body: formData,
-          });
+          if (!blob) {
+            const blackImg = await createBlackImageFile();
+            const result = await synthesizeLandscapeVideoClient(item.file, blackImg);
+            blob = result.blob;
+            ext = result.extension;
+          }
 
-          if (!res.ok) throw new Error('Synthesis failed');
-          const blob = await res.blob();
           const url = URL.createObjectURL(blob);
-          const baseName = item.file.name.replace(/\.[^/.]+$/, '');
-          const outName = `${baseName}_video.mp4`;
+          const outName = `${baseName || 'video'}.${ext}`;
 
           setQueue((prev) =>
             prev.map((it) =>
@@ -131,10 +152,10 @@ export const BatchConverter: React.FC = () => {
                     ...it,
                     status: 'completed',
                     progress: 100,
-                    outputBlob: blob,
+                    outputBlob: blob!,
                     outputUrl: url,
                     outputName: outName,
-                    outputSize: blob.size,
+                    outputSize: blob!.size,
                   }
                 : it
             )

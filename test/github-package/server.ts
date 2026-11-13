@@ -236,82 +236,14 @@ app.post('/api/convert/mp3-to-mp4', upload.fields([
   const audioPath = audioFile.path;
   const originalName = audioFile.originalname || 'video';
   const baseName = path.parse(originalName).name.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const outputPath = path.join(UPLOAD_DIR, `${baseName}_landscape_${Date.now()}.mp4`);
+  const timestamp = Date.now();
+  const stillPath = path.join(UPLOAD_DIR, `still_${timestamp}.mp4`);
+  const outputPath = path.join(UPLOAD_DIR, `${baseName}_landscape_${timestamp}.mp4`);
 
-  const showWaveform = req.body.showWaveform === 'true';
-  const fps = parseInt(req.body.fps || '30', 10);
-  const startTime = req.body.startTime ? parseFloat(req.body.startTime) : undefined;
-  const endTime = req.body.endTime ? parseFloat(req.body.endTime) : undefined;
-
-  // Fixed 16:9 Landscape dimensions (1920x1080) formatted for view
   const width = 1920;
   const height = 1080;
 
-  const args: string[] = ['-y'];
-
-  if (startTime !== undefined && !isNaN(startTime) && startTime > 0) {
-    args.push('-ss', startTime.toString());
-  }
-
-  args.push('-i', audioPath);
-
-  if (endTime !== undefined && !isNaN(endTime) && endTime > (startTime || 0)) {
-    const duration = endTime - (startTime || 0);
-    args.push('-t', duration.toString());
-  }
-
-  let filterComplex = '';
-
-  if (imageFile && fs.existsSync(imageFile.path)) {
-    // Loop image input
-    args.push('-loop', '1', '-i', imageFile.path);
-
-    if (showWaveform) {
-      filterComplex = `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black[bg];` +
-        `[0:a]showwaves=s=${width}x${Math.round(height * 0.18)}:mode=line:colors=white:r=${fps}[waves];` +
-        `[bg][waves]overlay=0:H-h-24[v]`;
-    } else {
-      filterComplex = `[1:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black[v]`;
-    }
-  } else {
-    // Fallback if no image provided: minimalist landscape infinity generator
-    filterComplex = `[0:a]avectorscope=s=${width}x${height}:m=lissajous:draw=line:rc=255:gc=255:bc=255[v]`;
-  }
-
-  args.push(
-    '-filter_complex', filterComplex,
-    '-map', '[v]',
-    '-map', '0:a',
-    '-c:v', 'libx264',
-    '-preset', 'ultrafast',
-    '-crf', '22',
-    '-pix_fmt', 'yuv420p',
-    '-c:a', 'aac',
-    '-b:a', '256k',
-    '-shortest',
-    '-movflags', '+faststart',
-    outputPath
-  );
-
-  console.log(`Executing FFmpeg MP3->MP4: ffmpeg ${args.join(' ')}`);
-
-  const ffmpeg = spawn('ffmpeg', args);
-  let stderr = '';
-
-  ffmpeg.stderr.on('data', (data) => {
-    stderr += data.toString();
-  });
-
-  ffmpeg.on('close', (code) => {
-    const toClean = [audioPath, outputPath];
-    if (imageFile) toClean.push(imageFile.path);
-
-    if (code !== 0) {
-      cleanupFiles(toClean);
-      console.error('FFmpeg MP3->MP4 failed:', stderr);
-      return res.status(500).json({ error: 'FFmpeg video synthesis failed', details: stderr });
-    }
-
+  const sendResult = (toClean: string[]) => {
     if (!fs.existsSync(outputPath)) {
       cleanupFiles(toClean);
       return res.status(500).json({ error: 'Output video was not generated' });
@@ -326,8 +258,10 @@ app.post('/api/convert/mp3-to-mp4', upload.fields([
       console.warn('Failed to copy to persistent download dir:', e);
     }
 
+    const stat = fs.statSync(outputPath);
     const downloadUrl = `/api/download/file/${fileId}?name=${encodeURIComponent(downloadFileName)}`;
     res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Length', stat.size.toString());
     res.setHeader('Content-Disposition', `attachment; filename="${downloadFileName}"`);
     res.setHeader('X-Output-Filename', downloadFileName);
     res.setHeader('X-Download-Url', downloadUrl);
@@ -335,20 +269,109 @@ app.post('/api/convert/mp3-to-mp4', upload.fields([
     const fileStream = fs.createReadStream(outputPath);
     fileStream.pipe(res);
 
-    fileStream.on('close', () => {
-      cleanupFiles(toClean);
-    });
-
+    fileStream.on('close', () => cleanupFiles(toClean));
     fileStream.on('error', (err) => {
       console.error('File stream error:', err);
       cleanupFiles(toClean);
     });
-  });
+  };
+
+  if (imageFile && fs.existsSync(imageFile.path)) {
+    // Fast 2-step still-image 16:9 encoding:
+    // Step 1: encode a 2-second 1fps 1920x1080 H.264 clip of the image (~0.2s)
+    const step1Args = [
+      '-y',
+      '-framerate', '1',
+      '-t', '2',
+      '-i', imageFile.path,
+      '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,format=yuv420p`,
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'stillimage',
+      '-r', '1',
+      '-g', '1',
+      stillPath,
+    ];
+
+    const step1 = spawn('ffmpeg', step1Args);
+    let step1Err = '';
+    step1.stderr.on('data', (d) => { step1Err += d.toString(); });
+
+    step1.on('close', (code1) => {
+      if (code1 !== 0 || !fs.existsSync(stillPath)) {
+        cleanupFiles([audioPath, imageFile.path, stillPath, outputPath]);
+        console.error('FFmpeg step1 failed:', step1Err);
+        return res.status(500).json({ error: 'FFmpeg image preparation failed', details: step1Err });
+      }
+
+      // Step 2: loop video packet copy + AAC audio (-shortest)
+      const step2Args = [
+        '-y',
+        '-stream_loop', '-1',
+        '-i', stillPath,
+        '-i', audioPath,
+        '-map', '0:v',
+        '-map', '1:a',
+        '-c:v', 'copy',
+        '-c:a', 'aac',
+        '-b:a', '192k',
+        '-shortest',
+        '-movflags', '+faststart',
+        outputPath,
+      ];
+
+      const step2 = spawn('ffmpeg', step2Args);
+      let step2Err = '';
+      step2.stderr.on('data', (d) => { step2Err += d.toString(); });
+
+      step2.on('close', (code2) => {
+        const toClean = [audioPath, imageFile.path, stillPath, outputPath];
+        if (code2 !== 0) {
+          cleanupFiles(toClean);
+          console.error('FFmpeg step2 failed:', step2Err);
+          return res.status(500).json({ error: 'FFmpeg video synthesis failed', details: step2Err });
+        }
+        sendResult(toClean);
+      });
+    });
+  } else {
+    // Fallback when no image provided (e.g. batch mode)
+    const args = [
+      '-y',
+      '-f', 'lavfi',
+      '-i', `color=c=black:s=${width}x${height}:r=1`,
+      '-i', audioPath,
+      '-map', '0:v',
+      '-map', '1:a',
+      '-c:v', 'libx264',
+      '-preset', 'ultrafast',
+      '-tune', 'stillimage',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-shortest',
+      '-movflags', '+faststart',
+      outputPath,
+    ];
+
+    const ffmpeg = spawn('ffmpeg', args);
+    let stderr = '';
+    ffmpeg.stderr.on('data', (d) => { stderr += d.toString(); });
+    ffmpeg.on('close', (code) => {
+      const toClean = [audioPath, outputPath];
+      if (code !== 0) {
+        cleanupFiles(toClean);
+        console.error('FFmpeg MP3->MP4 failed:', stderr);
+        return res.status(500).json({ error: 'FFmpeg video synthesis failed', details: stderr });
+      }
+      sendResult(toClean);
+    });
+  }
 });
 
 // 5. Direct Persistent File Download endpoint
 app.get('/api/download/file/:id', (req: Request, res: Response) => {
-  const fileId = req.params.id;
+  const fileId = path.basename(req.params.id);
   const requestedName = (req.query.name as string) || 'download';
   const filePath = path.join(DOWNLOAD_DIR, fileId);
 
@@ -356,11 +379,13 @@ app.get('/api/download/file/:id', (req: Request, res: Response) => {
     return res.status(404).json({ error: 'File expired or not found' });
   }
 
+  const stat = fs.statSync(filePath);
   const ext = path.extname(requestedName).toLowerCase();
   const contentType = ext === '.mp3' ? 'audio/mpeg' : ext === '.mp4' ? 'video/mp4' : 'application/octet-stream';
 
   res.setHeader('Content-Type', contentType);
-  res.setHeader('Content-Disposition', `attachment; filename="${requestedName}"`);
+  res.setHeader('Content-Length', stat.size.toString());
+  res.setHeader('Content-Disposition', `attachment; filename="${requestedName.replace(/"/g, '')}"`);
   fs.createReadStream(filePath).pipe(res);
 });
 

@@ -1,6 +1,59 @@
+import { Mp3Encoder } from '@breezystack/lamejs';
+
 /**
  * Audio encoding and decoding utilities for client-side processing
  */
+
+// Encode AudioBuffer to a real MP3 Blob on-device
+export async function audioBufferToMp3(
+  buffer: AudioBuffer,
+  kbps = 192,
+  onProgress?: (percent: number) => void
+): Promise<Blob> {
+  const numChannels = Math.min(2, buffer.numberOfChannels);
+  const sampleRate = buffer.sampleRate;
+  const encoder = new Mp3Encoder(numChannels, sampleRate, kbps);
+
+  const leftFloat = buffer.getChannelData(0);
+  const rightFloat = numChannels > 1 ? buffer.getChannelData(1) : null;
+
+  const length = leftFloat.length;
+  const leftInt16 = new Int16Array(length);
+  const rightInt16 = rightFloat ? new Int16Array(length) : undefined;
+
+  for (let i = 0; i < length; i++) {
+    const l = Math.max(-1, Math.min(1, leftFloat[i]));
+    leftInt16[i] = l < 0 ? l * 0x8000 : l * 0x7fff;
+    if (rightFloat && rightInt16) {
+      const r = Math.max(-1, Math.min(1, rightFloat[i]));
+      rightInt16[i] = r < 0 ? r * 0x8000 : r * 0x7fff;
+    }
+  }
+
+  const mp3Data: BlobPart[] = [];
+  const sampleBlockSize = 1152 * 16;
+
+  for (let i = 0; i < length; i += sampleBlockSize) {
+    const leftChunk = leftInt16.subarray(i, i + sampleBlockSize);
+    const rightChunk = rightInt16 ? rightInt16.subarray(i, i + sampleBlockSize) : undefined;
+    const mp3buf = encoder.encodeBuffer(leftChunk, rightChunk);
+    if (mp3buf.length > 0) {
+      mp3Data.push(new Uint8Array(mp3buf));
+    }
+    if (onProgress && i % (sampleBlockSize * 4) === 0) {
+      onProgress(Math.min(98, 50 + Math.round((i / length) * 48)));
+      await new Promise((r) => setTimeout(r, 0));
+    }
+  }
+
+  const endBuf = encoder.flush();
+  if (endBuf.length > 0) {
+    mp3Data.push(new Uint8Array(endBuf));
+  }
+
+  onProgress?.(100);
+  return new Blob(mp3Data, { type: 'audio/mpeg' });
+}
 
 // Helper to convert AudioBuffer to WAV format
 export function audioBufferToWav(buffer: AudioBuffer, opt?: { float32?: boolean }): Blob {
@@ -47,35 +100,21 @@ function encodeWAV(
   const buffer = new ArrayBuffer(44 + samples.length * bytesPerSample);
   const view = new DataView(buffer);
 
-  /* RIFF identifier */
   writeString(view, 0, 'RIFF');
-  /* RIFF chunk length */
   view.setUint32(4, 36 + samples.length * bytesPerSample, true);
-  /* RIFF type */
   writeString(view, 8, 'WAVE');
-  /* format chunk identifier */
   writeString(view, 12, 'fmt ');
-  /* format chunk length */
   view.setUint32(16, 16, true);
-  /* sample format (raw) */
   view.setUint16(20, format, true);
-  /* channel count */
   view.setUint16(22, numChannels, true);
-  /* sample rate */
   view.setUint32(24, sampleRate, true);
-  /* byte rate (sample rate * block align) */
   view.setUint32(28, sampleRate * blockAlign, true);
-  /* block align (channel count * bytes per sample) */
   view.setUint16(32, blockAlign, true);
-  /* bits per sample */
   view.setUint16(34, bitDepth, true);
-  /* data chunk identifier */
   writeString(view, 36, 'data');
-  /* data chunk length */
   view.setUint32(40, samples.length * bytesPerSample, true);
 
   if (format === 1) {
-    // 16-bit PCM
     floatTo16BitPCM(view, 44, samples);
   } else {
     writeFloat32(view, 44, samples);
@@ -110,11 +149,15 @@ export async function extractAudioFromVideoLocal(
 ): Promise<AudioBuffer> {
   onProgress?.(15);
   const arrayBuffer = await videoFile.arrayBuffer();
-  onProgress?.(45);
+  onProgress?.(35);
   const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-  onProgress?.(90);
-  return audioBuffer;
+  try {
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    onProgress?.(50);
+    return audioBuffer;
+  } finally {
+    audioContext.close().catch(() => {});
+  }
 }
 
 // Trim an AudioBuffer between start and end seconds
@@ -140,6 +183,7 @@ export function trimAudioBuffer(
     trimmed.copyToChannel(channelData, i, 0);
   }
 
+  audioContext.close().catch(() => {});
   return trimmed;
 }
 

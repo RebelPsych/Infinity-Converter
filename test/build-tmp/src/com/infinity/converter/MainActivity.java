@@ -2,6 +2,8 @@ package com.infinity.converter;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Build;
+import android.os.Environment;
 import android.net.Uri;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -10,21 +12,54 @@ import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.ValueCallback;
+import android.webkit.DownloadListener;
+import android.webkit.JavascriptInterface;
 import android.content.Intent;
 import android.content.ClipData;
+import android.content.ContentValues;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.media.MediaScannerConnection;
+import android.widget.Toast;
+import android.util.Base64;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Map;
 import java.util.HashMap;
+import java.util.UUID;
 
 public class MainActivity extends Activity {
     private WebView webView;
     private ValueCallback<Uri[]> mFilePathCallback;
     private static final int FILE_CHOOSER_REQUEST_CODE = 1001;
+    private static final int CREATE_DOCUMENT_REQUEST_CODE = 1002;
+    private static final int STORAGE_PERMISSION_REQUEST_CODE = 1003;
+
+    private File pendingExportTempFile;
+    private final Map<String, SaveSession> saveSessions = new HashMap<String, SaveSession>();
+
+    private static class SaveSession {
+        File tempFile;
+        String filename;
+        String mimeType;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Request legacy storage permission on Android 6-9
+        if (Build.VERSION.SDK_INT >= 23 && Build.VERSION.SDK_INT < 29) {
+            if (checkSelfPermission(android.Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{
+                    android.Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                    android.Manifest.permission.READ_EXTERNAL_STORAGE
+                }, STORAGE_PERMISSION_REQUEST_CODE);
+            }
+        }
 
         webView = new WebView(this);
         webView.setBackgroundColor(Color.parseColor("#000000"));
@@ -39,7 +74,6 @@ public class MainActivity extends Activity {
         settings.setAllowUniversalAccessFromFileURLs(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
 
-        // Custom WebViewClient intercepting https://infinity.local to prevent module CORS issues
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
@@ -95,7 +129,6 @@ public class MainActivity extends Activity {
             }
         });
 
-        // WebChromeClient with onShowFileChooser to open device file picker
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(WebView webView, ValueCallback<Uri[]> filePathCallback, FileChooserParams fileChooserParams) {
@@ -131,38 +164,188 @@ public class MainActivity extends Activity {
             }
         });
 
-        // Bridge to save downloads directly to Android Downloads directory
+        webView.setDownloadListener(new DownloadListener() {
+            @Override
+            public void onDownloadStart(String url, String userAgent, String contentDisposition, String mimeType, long contentLength) {
+                if (url != null && url.startsWith("blob:")) {
+                    String safeMime = (mimeType != null && !mimeType.isEmpty()) ? mimeType : "application/octet-stream";
+                    String safeName = "infinity_output";
+                    if (safeMime.contains("audio") || safeMime.contains("mpeg")) safeName += ".mp3";
+                    else if (safeMime.contains("mp4") || safeMime.contains("video")) safeName += ".mp4";
+                    String js = "(function(){fetch('" + url + "').then(function(r){return r.blob();}).then(function(b){var fr=new FileReader();fr.onloadend=function(){var res=fr.result;if(res&&res.indexOf(',')>-1){window.AndroidBridge.downloadBase64(res.split(',')[1],'" + safeName + "','" + safeMime + "');}};fr.readAsDataURL(b);});})();";
+                    webView.evaluateJavascript(js, null);
+                }
+            }
+        });
+
+        // Bridge supporting both chunked transfers (large files) and single-shot base64
         webView.addJavascriptInterface(new Object() {
-            @android.webkit.JavascriptInterface
-            public void downloadBase64(String base64Data, String filename, String mimeType) {
+            @JavascriptInterface
+            public String startFileSave(String filename, String mimeType) {
                 try {
-                    byte[] bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT);
-                    java.io.File path = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
-                    if (!path.exists()) {
-                        path.mkdirs();
+                    String id = UUID.randomUUID().toString();
+                    File temp = new File(getCacheDir(), "dl_" + id);
+                    if (temp.exists()) temp.delete();
+                    SaveSession s = new SaveSession();
+                    s.tempFile = temp;
+                    s.filename = sanitizeFilename(filename);
+                    s.mimeType = (mimeType != null && !mimeType.isEmpty()) ? mimeType : "application/octet-stream";
+                    synchronized (saveSessions) {
+                        saveSessions.put(id, s);
                     }
-                    java.io.File file = new java.io.File(path, filename);
-                    java.io.FileOutputStream fos = new java.io.FileOutputStream(file);
+                    return id;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    return "";
+                }
+            }
+
+            @JavascriptInterface
+            public boolean appendFileChunk(String saveId, String base64Chunk) {
+                SaveSession s;
+                synchronized (saveSessions) {
+                    s = saveSessions.get(saveId);
+                }
+                if (s == null || base64Chunk == null) return false;
+                FileOutputStream fos = null;
+                try {
+                    byte[] bytes = Base64.decode(base64Chunk, Base64.DEFAULT);
+                    fos = new FileOutputStream(s.tempFile, true);
+                    fos.write(bytes);
+                    fos.flush();
+                    return true;
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    return false;
+                } finally {
+                    if (fos != null) try { fos.close(); } catch (Exception ignored) {}
+                }
+            }
+
+            @JavascriptInterface
+            public void finishFileSave(String saveId) {
+                SaveSession s;
+                synchronized (saveSessions) {
+                    s = saveSessions.remove(saveId);
+                }
+                if (s == null || !s.tempFile.exists()) return;
+                saveTempFileToDownloads(s.tempFile, s.filename, s.mimeType);
+            }
+
+            @JavascriptInterface
+            public void downloadBase64(String base64Data, String filename, String mimeType) {
+                FileOutputStream fos = null;
+                try {
+                    byte[] bytes = Base64.decode(base64Data, Base64.DEFAULT);
+                    File temp = new File(getCacheDir(), "dl_" + UUID.randomUUID().toString());
+                    fos = new FileOutputStream(temp);
                     fos.write(bytes);
                     fos.flush();
                     fos.close();
-                    android.media.MediaScannerConnection.scanFile(MainActivity.this, new String[]{file.getAbsolutePath()}, new String[]{mimeType}, null);
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            android.widget.Toast.makeText(MainActivity.this, "Saved to Downloads: " + filename, android.widget.Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    fos = null;
+                    saveTempFileToDownloads(temp, sanitizeFilename(filename), mimeType);
                 } catch (Exception e) {
                     e.printStackTrace();
+                    showToast("Download failed: " + e.getMessage());
+                } finally {
+                    if (fos != null) try { fos.close(); } catch (Exception ignored) {}
                 }
             }
         }, "AndroidBridge");
 
-        // Load via virtual secure local domain
         webView.loadUrl("https://infinity.local/index.html");
-
         setContentView(webView);
+    }
+
+    private String sanitizeFilename(String name) {
+        if (name == null || name.trim().isEmpty()) return "infinity_file";
+        return name.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private void showToast(final String msg) {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void copyStream(InputStream in, OutputStream out) throws Exception {
+        byte[] buf = new byte[65536];
+        int len;
+        while ((len = in.read(buf)) > 0) {
+            out.write(buf, 0, len);
+        }
+        out.flush();
+    }
+
+    private void saveTempFileToDownloads(File tempFile, String filename, String mimeType) {
+        String safeMime = (mimeType != null && !mimeType.isEmpty()) ? mimeType : "application/octet-stream";
+
+        // 1. Android 10+ (API 29+): MediaStore Downloads (Scoped Storage compliant, zero permissions needed)
+        if (Build.VERSION.SDK_INT >= 29) {
+            OutputStream out = null;
+            InputStream in = null;
+            try {
+                ContentValues values = new ContentValues();
+                values.put("_display_name", filename);
+                values.put("mime_type", safeMime);
+                values.put("relative_path", Environment.DIRECTORY_DOWNLOADS);
+                Uri uri = getContentResolver().insert(Uri.parse("content://media/external/downloads"), values);
+                if (uri != null) {
+                    out = getContentResolver().openOutputStream(uri);
+                    if (out != null) {
+                        in = new FileInputStream(tempFile);
+                        copyStream(in, out);
+                        tempFile.delete();
+                        showToast("Saved to Downloads: " + filename);
+                        return;
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                if (in != null) try { in.close(); } catch (Exception ignored) {}
+                if (out != null) try { out.close(); } catch (Exception ignored) {}
+            }
+        }
+
+        // 2. Android 5-9 (API < 29): Legacy public Downloads folder
+        if (Build.VERSION.SDK_INT < 29) {
+            OutputStream out = null;
+            InputStream in = null;
+            try {
+                File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                if (!dir.exists()) dir.mkdirs();
+                File dest = new File(dir, filename);
+                in = new FileInputStream(tempFile);
+                out = new FileOutputStream(dest);
+                copyStream(in, out);
+                MediaScannerConnection.scanFile(this, new String[]{dest.getAbsolutePath()}, new String[]{safeMime}, null);
+                tempFile.delete();
+                showToast("Saved to Downloads: " + filename);
+                return;
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
+                if (in != null) try { in.close(); } catch (Exception ignored) {}
+                if (out != null) try { out.close(); } catch (Exception ignored) {}
+            }
+        }
+
+        // 3. Ultimate Fallback: System "Save As" document picker (works on ALL Android versions)
+        try {
+            pendingExportTempFile = tempFile;
+            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType(safeMime);
+            intent.putExtra(Intent.EXTRA_TITLE, filename);
+            startActivityForResult(intent, CREATE_DOCUMENT_REQUEST_CODE);
+        } catch (Exception e) {
+            e.printStackTrace();
+            showToast("Could not save file: " + e.getMessage());
+        }
     }
 
     @Override
@@ -184,6 +367,30 @@ public class MainActivity extends Activity {
                 }
                 mFilePathCallback.onReceiveValue(results);
                 mFilePathCallback = null;
+            }
+            return;
+        } else if (requestCode == CREATE_DOCUMENT_REQUEST_CODE) {
+            if (pendingExportTempFile != null) {
+                if (resultCode == Activity.RESULT_OK && data != null && data.getData() != null) {
+                    InputStream in = null;
+                    OutputStream out = null;
+                    try {
+                        in = new FileInputStream(pendingExportTempFile);
+                        out = getContentResolver().openOutputStream(data.getData());
+                        if (out != null) {
+                            copyStream(in, out);
+                            showToast("File saved successfully!");
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        showToast("Save failed: " + e.getMessage());
+                    } finally {
+                        if (in != null) try { in.close(); } catch (Exception ignored) {}
+                        if (out != null) try { out.close(); } catch (Exception ignored) {}
+                    }
+                }
+                pendingExportTempFile.delete();
+                pendingExportTempFile = null;
             }
             return;
         }

@@ -8,7 +8,7 @@ import {
   Music,
 } from 'lucide-react';
 import { formatBytes } from '../utils/audioEncoder';
-import { downloadMedia } from '../utils/downloadHelper';
+import { isAndroidApk, saveToAndroidBridge } from '../utils/downloadHelper';
 import { synthesizeLandscapeVideoClient } from '../utils/videoSynthesizer';
 
 export const Mp3ToMp4Converter: React.FC = () => {
@@ -26,12 +26,14 @@ export const Mp3ToMp4Converter: React.FC = () => {
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
   const [serverDownloadUrl, setServerDownloadUrl] = useState<string | null>(null);
   const [outputFilename, setOutputFilename] = useState<string>('');
+  const [savedNotice, setSavedNotice] = useState(false);
 
   const audioInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
 
   const handleAudio = (file: File) => {
     setError(null);
+    setSavedNotice(false);
     setOutputBlob(null);
     if (outputUrl) URL.revokeObjectURL(outputUrl);
     setOutputUrl(null);
@@ -44,6 +46,7 @@ export const Mp3ToMp4Converter: React.FC = () => {
 
   const handleImage = (file: File) => {
     setError(null);
+    setSavedNotice(false);
     setOutputBlob(null);
     if (outputUrl) URL.revokeObjectURL(outputUrl);
     setOutputUrl(null);
@@ -66,52 +69,58 @@ export const Mp3ToMp4Converter: React.FC = () => {
     }
 
     setIsConverting(true);
-    setProgress(20);
+    setSavedNotice(false);
+    setProgress(15);
     setError(null);
-    setStage('Synthesizing landscape video...');
+    setStage('Creating landscape video...');
 
     try {
       let succeeded = false;
 
-      // 1. Try server conversion first
-      try {
-        const formData = new FormData();
-        formData.append('file', audioFile);
-        formData.append('image', imageFile);
-        formData.append('fps', '30');
+      // 1. Try server FFmpeg conversion when running on web server
+      if (!isAndroidApk()) {
+        try {
+          const formData = new FormData();
+          formData.append('file', audioFile);
+          formData.append('image', imageFile);
 
-        const res = await fetch('/api/convert/mp3-to-mp4', {
-          method: 'POST',
-          body: formData,
-        });
+          const res = await fetch('/api/convert/mp3-to-mp4', {
+            method: 'POST',
+            body: formData,
+          });
 
-        if (res.ok) {
-          const dlUrl = res.headers.get('X-Download-Url');
-          if (dlUrl) setServerDownloadUrl(dlUrl);
+          if (res.ok) {
+            const dlUrl = res.headers.get('X-Download-Url');
+            if (dlUrl) setServerDownloadUrl(dlUrl);
 
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          setOutputBlob(blob);
-          setOutputUrl(url);
-          setProgress(100);
-          setStage('Complete!');
-          succeeded = true;
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            setOutputBlob(blob);
+            setOutputUrl(url);
+            setProgress(100);
+            setStage('Complete!');
+            succeeded = true;
+          }
+        } catch (networkErr) {
+          console.warn('Server conversion unavailable, switching to on-device MP4 synthesizer:', networkErr);
         }
-      } catch (networkErr) {
-        console.warn('Server endpoint unavailable, falling back to on-device synthesizer:', networkErr);
       }
 
-      // 2. Client-side fallback: synthesizes 16:9 video on device without network
+      // 2. Fast on-device synthesizer fallback (and primary path in Android APK)
       if (!succeeded) {
         setStage('Synthesizing 16:9 video on device...');
-        setProgress(50);
+        setProgress(25);
 
-        const localBlob = await synthesizeLandscapeVideoClient(audioFile, imageFile, (msg) => {
+        const result = await synthesizeLandscapeVideoClient(audioFile, imageFile, (msg, pct) => {
           setStage(msg);
+          if (typeof pct === 'number') setProgress(pct);
         });
 
-        const url = URL.createObjectURL(localBlob);
-        setOutputBlob(localBlob);
+        const baseName = audioFile.name.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+        setOutputFilename(`${baseName || 'video'}.${result.extension}`);
+
+        const url = URL.createObjectURL(result.blob);
+        setOutputBlob(result.blob);
         setOutputUrl(url);
         setProgress(100);
         setStage('Complete!');
@@ -124,9 +133,27 @@ export const Mp3ToMp4Converter: React.FC = () => {
     }
   };
 
-  const handleDownload = () => {
-    if (!outputBlob) return;
-    downloadMedia(outputBlob, outputFilename, serverDownloadUrl || undefined);
+  const handleDownloadClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!outputBlob) {
+      e.preventDefault();
+      return;
+    }
+
+    if (isAndroidApk()) {
+      e.preventDefault();
+      const ok = await saveToAndroidBridge(outputBlob, outputFilename);
+      if (ok) {
+        setSavedNotice(true);
+        setTimeout(() => setSavedNotice(false), 3000);
+      } else {
+        setError('Could not save video to Downloads.');
+      }
+      return;
+    }
+
+    // Standard web browser: allow native <a href={...} download={...}> behavior
+    setSavedNotice(true);
+    setTimeout(() => setSavedNotice(false), 2500);
   };
 
   const resetAll = () => {
@@ -140,7 +167,10 @@ export const Mp3ToMp4Converter: React.FC = () => {
     setServerDownloadUrl(null);
     setProgress(0);
     setError(null);
+    setSavedNotice(false);
   };
+
+  const downloadHref = serverDownloadUrl || outputUrl || '#';
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
@@ -328,20 +358,21 @@ export const Mp3ToMp4Converter: React.FC = () => {
             />
           </div>
 
-          <div className="flex items-center justify-between pt-2">
+          <div className="flex items-center justify-between pt-2 gap-3">
             <div className="text-xs font-mono text-neutral-400 truncate max-w-xs">
-              {outputFilename}
+              {savedNotice ? 'Saved to Downloads' : outputFilename}
             </div>
 
-            {/* Reliable Download Button */}
-            <button
-              type="button"
-              onClick={handleDownload}
+            {/* Native Download Link with APK bridge */}
+            <a
+              href={downloadHref}
+              download={outputFilename}
+              onClick={handleDownloadClick}
               className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition-colors cursor-pointer shrink-0 shadow-lg"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Download MP4</span>
-            </button>
+              <span>{savedNotice ? 'Saved!' : 'Download MP4'}</span>
+            </a>
           </div>
         </div>
       )}

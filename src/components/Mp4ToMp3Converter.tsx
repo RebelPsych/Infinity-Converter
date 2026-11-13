@@ -9,9 +9,12 @@ import {
   CheckCircle,
   FileVideo,
 } from 'lucide-react';
-import { formatBytes } from '../utils/audioEncoder';
-import { extractAudioFromVideoLocal, audioBufferToWav } from '../utils/audioEncoder';
-import { downloadMedia } from '../utils/downloadHelper';
+import {
+  formatBytes,
+  extractAudioFromVideoLocal,
+  audioBufferToMp3,
+} from '../utils/audioEncoder';
+import { isAndroidApk, saveToAndroidBridge } from '../utils/downloadHelper';
 
 export const Mp4ToMp3Converter: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
@@ -27,6 +30,7 @@ export const Mp4ToMp3Converter: React.FC = () => {
   const [outputUrl, setOutputUrl] = useState<string | null>(null);
   const [serverDownloadUrl, setServerDownloadUrl] = useState<string | null>(null);
   const [outputFilename, setOutputFilename] = useState<string>('');
+  const [savedNotice, setSavedNotice] = useState(false);
 
   // Audio preview playback
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -35,6 +39,7 @@ export const Mp4ToMp3Converter: React.FC = () => {
 
   const handleFile = (selectedFile: File) => {
     setError(null);
+    setSavedNotice(false);
     setOutputBlob(null);
     if (outputUrl) URL.revokeObjectURL(outputUrl);
     setOutputUrl(null);
@@ -51,51 +56,55 @@ export const Mp4ToMp3Converter: React.FC = () => {
   const handleConvert = async () => {
     if (!file) return;
     setIsConverting(true);
-    setProgress(20);
+    setSavedNotice(false);
+    setProgress(15);
     setError(null);
-    setStage('Extracting audio track...');
+    setStage('Extracting audio...');
 
     try {
-      // 1. Try server conversion first
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('bitrate', '320k');
-      formData.append('sampleRate', '44100');
-      formData.append('channels', '2');
-
       let succeeded = false;
-      try {
-        const res = await fetch('/api/convert/mp4-to-mp3', {
-          method: 'POST',
-          body: formData,
-        });
 
-        if (res.ok) {
-          const dlUrl = res.headers.get('X-Download-Url');
-          if (dlUrl) setServerDownloadUrl(dlUrl);
+      // 1. Try server conversion when running on web server
+      if (!isAndroidApk()) {
+        try {
+          const formData = new FormData();
+          formData.append('file', file);
+          formData.append('bitrate', '320k');
+          formData.append('sampleRate', '44100');
+          formData.append('channels', '2');
 
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          setOutputBlob(blob);
-          setOutputUrl(url);
-          setProgress(100);
-          setStage('Complete!');
-          succeeded = true;
+          const res = await fetch('/api/convert/mp4-to-mp3', {
+            method: 'POST',
+            body: formData,
+          });
+
+          if (res.ok) {
+            const dlUrl = res.headers.get('X-Download-Url');
+            if (dlUrl) setServerDownloadUrl(dlUrl);
+
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            setOutputBlob(blob);
+            setOutputUrl(url);
+            setProgress(100);
+            setStage('Complete!');
+            succeeded = true;
+          }
+        } catch (networkErr) {
+          console.warn('Server conversion unavailable, switching to on-device MP3 encoder:', networkErr);
         }
-      } catch (networkErr) {
-        console.warn('Server conversion unavailable, running on-device extractor:', networkErr);
       }
 
-      // 2. Client-side fallback if server failed or offline
+      // 2. Client-side real MP3 encoder fallback (and primary path in Android APK)
       if (!succeeded) {
-        setStage('Processing audio on device...');
-        setProgress(50);
+        setStage('Encoding MP3 on device...');
+        setProgress(25);
 
         const audioBuffer = await extractAudioFromVideoLocal(file, (p) => setProgress(p));
-        const wavBlob = audioBufferToWav(audioBuffer);
-        const url = URL.createObjectURL(wavBlob);
+        const mp3Blob = await audioBufferToMp3(audioBuffer, 192, (p) => setProgress(p));
+        const url = URL.createObjectURL(mp3Blob);
 
-        setOutputBlob(wavBlob);
+        setOutputBlob(mp3Blob);
         setOutputUrl(url);
         setProgress(100);
         setStage('Complete!');
@@ -108,9 +117,27 @@ export const Mp4ToMp3Converter: React.FC = () => {
     }
   };
 
-  const handleDownload = () => {
-    if (!outputBlob) return;
-    downloadMedia(outputBlob, outputFilename, serverDownloadUrl || undefined);
+  const handleDownloadClick = async (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!outputBlob) {
+      e.preventDefault();
+      return;
+    }
+
+    if (isAndroidApk()) {
+      e.preventDefault();
+      const ok = await saveToAndroidBridge(outputBlob, outputFilename);
+      if (ok) {
+        setSavedNotice(true);
+        setTimeout(() => setSavedNotice(false), 3000);
+      } else {
+        setError('Could not save file to Downloads.');
+      }
+      return;
+    }
+
+    // Standard web browser: allow native <a href={...} download={...}> behavior
+    setSavedNotice(true);
+    setTimeout(() => setSavedNotice(false), 2500);
   };
 
   const togglePlayAudio = () => {
@@ -134,8 +161,11 @@ export const Mp4ToMp3Converter: React.FC = () => {
     setServerDownloadUrl(null);
     setProgress(0);
     setError(null);
+    setSavedNotice(false);
     setIsPlayingAudio(false);
   };
+
+  const downloadHref = serverDownloadUrl || outputUrl || '#';
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6">
@@ -267,7 +297,7 @@ export const Mp4ToMp3Converter: React.FC = () => {
                 </div>
               </div>
 
-              {/* Audio Player */}
+              {/* Audio Player & Download */}
               <div className="flex items-center gap-4 p-3 rounded-xl border border-neutral-800 bg-neutral-900">
                 <audio
                   ref={audioRef}
@@ -291,19 +321,20 @@ export const Mp4ToMp3Converter: React.FC = () => {
                     {outputFilename}
                   </div>
                   <div className="text-[11px] font-mono text-neutral-400">
-                    {formatBytes(outputBlob.size)}
+                    {savedNotice ? 'Saved to Downloads' : formatBytes(outputBlob.size)}
                   </div>
                 </div>
 
-                {/* Reliable Download Button */}
-                <button
-                  type="button"
-                  onClick={handleDownload}
+                {/* Native Download Link with APK bridge */}
+                <a
+                  href={downloadHref}
+                  download={outputFilename}
+                  onClick={handleDownloadClick}
                   className="flex items-center gap-1.5 rounded-lg bg-white px-5 py-2.5 text-xs font-bold uppercase tracking-wider text-black hover:bg-neutral-200 transition-colors cursor-pointer shrink-0 shadow-lg"
                 >
                   <Download className="w-3.5 h-3.5" />
-                  <span>Download MP3</span>
-                </button>
+                  <span>{savedNotice ? 'Saved!' : 'Download MP3'}</span>
+                </a>
               </div>
             </div>
           )}
